@@ -1,9 +1,9 @@
 #!/usr/local/bin/perl 
 #Program: mailfilt
 #Author: Michael Fisk
-#Date: July 1994, last modified 7-10-95
+#Date: July 1994, last modified 7-24-95
 #Language: Perl 4/5
-#Version: 1.2
+#Version: 1.3
 #URL: http://www.nmt.edu/~mfisk/mailfilt.html
 
 #Filter incoming mail based on a rules file
@@ -13,7 +13,9 @@ $user = (getpwuid($>))[0];
 if (! ($host = $ENV{'HOST'}) ) { chop($host =`hostname`); }
 
 $inbox = "/var/spool/mail/$user";
-$homedir = (getpwuid($>))[7];
+if (! ($homedir = (getpwuid($>))[7])) {
+    &Die("Can't get home directory\n");
+}
 
 ############### Configurable paths #######################
 $ENV{PATH} = "/bin:/usr/local/bin:/usr/lanl/bin:$homedir/usr/bin/sun4";
@@ -23,7 +25,7 @@ $rules = "$maildir/.rules";
 $logfile = "$maildir/.filtlog";
 ##########################################################
 
-open (STDERR,">>$logfile") || die;
+open(STDERR,">>$logfile") || &Die("Can't open logfile\n");
 
 while( ($_ = <>) !~ /^\s*$/ ) {
 	$Header[$h++] = $_;
@@ -43,7 +45,7 @@ print STDERR "From $Key{'From'} to $Key{'Rcpt'} about $Key{'Subject'} => ";
 
 if (! open(rules,"<$rules")) {
     print STDERR "[Rules file not found: $rules] ";
-    open(rules,"</dev/null") || die "Fatal error";
+    open(rules,"</dev/null") || &Die("Fatal error");
 }
 
 while( (! $box) && ($_ = <rules>)) {
@@ -52,7 +54,7 @@ while( (! $box) && ($_ = <rules>)) {
     s/\s*$//g;			# Remove trailing whitespace
     if ( /^\s*$/ ) {		# Blank line
 	nop; 
-    } elsif ( /([^\s]+):$/ ) {	# Header
+    } elsif ( /^([^\s]+.*):$/ ) {	# Header
 	&CheckForMatch; 
 	$thisbox = $1;
 	$newbox = 1;
@@ -72,9 +74,8 @@ if ( ! $box && $newbox ) { $box = $thisbox; }
 
 print STDERR "$box";
 
-if ($box =~ /\@/) {
-    open (folder,"|/usr/lib/sendmail '$box'") 
-	|| die "Can't run sendmail for $box.\n";
+if ($box =~ /^[^\|]+\@/) {
+    open (folder,"|/usr/lib/sendmail box'") || &Die("Can't run sendmail for $box.\n");
 } else {
     if ($box) {
 	if ($box !~ /^[\|\/]/ ) { $box = "$maildir/$box"; }
@@ -83,11 +84,11 @@ if ($box =~ /\@/) {
 	print STDERR "INBOX";
     }
     if ($box =~ /^\|/) {
-	open(folder,"$box") || die "Can't open $box.\n";
+	open(folder,"$box") || &Die("Can't open $box.\n");
     } else {
 	while(-e "$box.lock") { sleep 1; }
 	open(lock,">$box.lock"); print lock $$; close lock;
-	open (folder,">>$box") || die "Can't open $box.\n";
+	open (folder,">>$box") || &Die("Can't open $box.\n");
 	flock(folder,2) || print stderr $!;		# Lock mailbox file
 	seek(folder,0,2);		      # Make sure we're at the end
 	select(folder); $| = 1; select(STDOUT);
@@ -96,7 +97,7 @@ if ($box =~ /\@/) {
 
 #print STDERR "\n";
 
-for ($i=0; $i<$h; $i++) { print folder $Header[$i] || die $!; }
+for ($i=0; $i<$h; $i++) { print folder $Header[$i] || &Die($!); }
 print folder "X-Forwarded-By: $user@$host using mailfilt\n" if $box =~ /@/;
 print folder "\n";
 
@@ -145,7 +146,7 @@ if ( $box !~ /[\|\@]/) {   # Unlock mailbox
     unlink("$box.lock");
 }
 			
-die $err if $err;
+&Die($err) if $err;
        
 print STDERR " $Count lines\n";
 exit;
@@ -159,6 +160,7 @@ sub AddCondition {
 	
 sub CheckForMatch {
 	$match = $NumConditions;
+	                # Don't forward the same message multiple times.
 	if (($thisbox =~ /@/) && ($Key{'X-Forwarded-By'} ne "")) { 
 	    $match = 0; 
 	}
@@ -171,4 +173,11 @@ sub CheckForMatch {
 	}
 	if ($match) { $box = $thisbox; };
 	$NumConditions=0;
+}
+
+sub Die {
+    local($msg) = shift;
+    $! = 75;
+    print $thelog "$msg";
+    die($msg);
 }
