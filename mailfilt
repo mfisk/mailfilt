@@ -1,9 +1,9 @@
 #!/usr/local/bin/perl 
 #Program: mailfilt
 #Author: Michael Fisk
-#Date: July 1994, last modified 7-24-95
-#Language: Perl 4/5
-#Version: 1.3
+#Date: July 1994
+#Language: Perl
+#Version: $Id$
 #URL: http://www.nmt.edu/~mfisk/mailfilt.html
 
 #Filter incoming mail based on a rules file
