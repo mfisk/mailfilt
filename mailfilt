@@ -1,0 +1,174 @@
+#!/usr/local/bin/perl 
+#Program: mailfilt
+#Author: Michael Fisk
+#Date: July 1994, last modified 7-10-95
+#Language: Perl 4/5
+#Version: 1.2
+#URL: http://www.nmt.edu/~mfisk/mailfilt.html
+
+#Filter incoming mail based on a rules file
+#Check PGP signatures when provided
+
+$user = (getpwuid($>))[0];
+if (! ($host = $ENV{'HOST'}) ) { chop($host =`hostname`); }
+
+$inbox = "/var/spool/mail/$user";
+$homedir = (getpwuid($>))[7];
+
+############### Configurable paths #######################
+$ENV{PATH} = "/bin:/usr/local/bin:/usr/lanl/bin:$homedir/usr/bin/sun4";
+$ENV{PGPPATH} = "$homedir/usr/pgp";
+$maildir = "$homedir/mail";	       
+$rules = "$maildir/.rules";
+$logfile = "$maildir/.filtlog";
+##########################################################
+
+open (STDERR,">>$logfile") || die;
+
+while( ($_ = <>) !~ /^\s*$/ ) {
+	$Header[$h++] = $_;
+	if (/^([^\s]*): (.*)\s*$/) { $Key{$1} = $2; }
+	else { 
+	    $Key{$1} .= $_; 
+	    $Key{$1} =~ s/\s+/ /g;
+	}
+}
+
+$Key{'Rcpt'} = $Key{'To'};
+$Key{'Rcpt'} .= " " . $Key{'Cc'} if $Key{'Cc'};
+$Key{'Rcpt'} .= " " . $Key{'CC'} if $Key{'CC'};
+$Key{'Rcpt'} .= " " . $Key{'cc'} if $Key{'cc'};
+
+print STDERR "From $Key{'From'} to $Key{'Rcpt'} about $Key{'Subject'} => ";
+
+if (! open(rules,"<$rules")) {
+    print STDERR "[Rules file not found: $rules] ";
+    open(rules,"</dev/null") || die "Fatal error";
+}
+
+while( (! $box) && ($_ = <rules>)) {
+    chop;
+    ($_,$Garbage) = split(/\#/,$_,2); # Cut comments out before parsing
+    s/\s*$//g;			# Remove trailing whitespace
+    if ( /^\s*$/ ) {		# Blank line
+	nop; 
+    } elsif ( /([^\s]+):$/ ) {	# Header
+	&CheckForMatch; 
+	$thisbox = $1;
+	$newbox = 1;
+    } elsif ( /\s*([^:]+):\s(.*)$/ ) { # Criterion
+	($theKey,$theString) = ($1,$2);
+	if ( $theKey =~ /^&(.*)$/ ) { 
+	    $theKey = $1;
+	    &AddCondition;
+	} else {
+	    &CheckForMatch;
+	    &AddCondition;
+	}	
+    }			
+}				
+&CheckForMatch; 
+if ( ! $box && $newbox ) { $box = $thisbox; }
+
+print STDERR "$box";
+
+if ($box =~ /\@/) {
+    open (folder,"|/usr/lib/sendmail '$box'") 
+	|| die "Can't run sendmail for $box.\n";
+} else {
+    if ($box) {
+	if ($box !~ /^[\|\/]/ ) { $box = "$maildir/$box"; }
+    } else {
+	$box = $inbox;
+	print STDERR "INBOX";
+    }
+    if ($box =~ /^\|/) {
+	open(folder,"$box") || die "Can't open $box.\n";
+    } else {
+	while(-e "$box.lock") { sleep 1; }
+	open(lock,">$box.lock"); print lock $$; close lock;
+	open (folder,">>$box") || die "Can't open $box.\n";
+	flock(folder,2) || print stderr $!;		# Lock mailbox file
+	seek(folder,0,2);		      # Make sure we're at the end
+	select(folder); $| = 1; select(STDOUT);
+    }
+}
+
+#print STDERR "\n";
+
+for ($i=0; $i<$h; $i++) { print folder $Header[$i] || die $!; }
+print folder "X-Forwarded-By: $user@$host using mailfilt\n" if $box =~ /@/;
+print folder "\n";
+
+line:
+while($_ = <>) {  
+    if (/^-+BEGIN PGP SIGNED/) {
+	$inpgp++;
+
+	if (! open(pgp,"|pgp -f >/tmp/mailfilt.$$.$inpgp 2>&1 >/dev/null")) {
+	    warn "pgp: $!";
+	    $inpgp--;
+	}
+    }
+
+    print folder $_ || warn $!;
+
+    if ($inpgp) {
+	print pgp || warn $!;
+
+	if (/^-+END PGP/) {
+	    close pgp;
+	    open(pgp,"</tmp/mailfilt.$$.$inpgp") || 
+		warn "/tmp/mailfilt.$$.$inpgp: $!";
+	    while(<pgp>) { 
+		if (! /^\s*$/) {
+		    print folder "-----mailfilt/pgp: $_" || warn $!;
+		}
+	    }
+	    close(pgp);
+	    unlink("/tmp/mailfilt.$$.$inpgp");
+	    $inpgp--;
+	}
+    }
+    $Count++;
+}	
+
+print folder "\n";
+
+if ( $box !~ /[\|\@]/) {   # Unlock mailbox 
+    flock(folder,8) || print stderr "unlock: $!";
+}
+			
+close(folder) || ($err = $!);
+
+if ( $box !~ /[\|\@]/) {   # Unlock mailbox 
+    unlink("$box.lock");
+}
+			
+die $err if $err;
+       
+print STDERR " $Count lines\n";
+exit;
+
+sub AddCondition {
+    $key[$NumConditions] = $theKey;
+    $string[$NumConditions] = $theString;
+    $NumConditions++;
+    $newbox = 0;
+}
+	
+sub CheckForMatch {
+	$match = $NumConditions;
+	if (($thisbox =~ /@/) && ($Key{'X-Forwarded-By'} ne "")) { 
+	    $match = 0; 
+	}
+	for ($i=0; $i<$NumConditions; $i++) {
+		if ( $key[$i] =~ /^!(.*)$/ ) {
+			if ( $Key{$1} =~ m/$string[$i]/i ) { $match = 0; }
+		} elsif ( $Key{$key[$i]} !~ m/$string[$i]/i ) { 
+			$match = 0; 
+		}
+	}
+	if ($match) { $box = $thisbox; };
+	$NumConditions=0;
+}
