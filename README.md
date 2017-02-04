@@ -8,7 +8,7 @@ The following shows a sample /.rules/ file that illustrates many of the
 features:
 
 PGP
-===
+---
 
 Mailfilt has built-in support for PGP signatures.  When it encounters a
 PGP signed message, it will attempt to run /pgp/ to authenticate
@@ -78,13 +78,13 @@ Grammer for .rules file:
 
     SET        ::=        TARGET: {COMMENT} \n
                           {RULESET}
-                	  {SET}
+                          {SET}
 
     TARGET     ::=        FOLDER | ADDRESS | PIPE
 
     RULESET    ::=        WS RULE
-               		  WS ANDRULE
-                	  {SKIPLINE RULESET}
+                          WS ANDRULE
+                          {SKIPLINE RULESET}
 
     ANDRULE    ::=        &RULE {ANDRULE}
 
@@ -101,8 +101,8 @@ Grammer for .rules file:
 
     SKIPLINE   ::=        \n{COMMENT}\n
 
-    WS         ::=	  \t  {WS} 
-	       | 	  ` ' {WS}
+    WS         ::=         \t  {WS} 
+               |          ` ' {WS}
 
     COMMENT    ::=        {WS}#string
 
